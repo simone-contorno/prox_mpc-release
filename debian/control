@@ -1,0 +1,13 @@
+Source: ros-jazzy-prox-mpc-benchmark
+Section: misc
+Priority: optional
+Maintainer: "Simone Contorno" <simone.contorno@outlook.it>
+Build-Depends: debhelper (>= 9.0.0), ros-jazzy-ament-cmake, ros-jazzy-ament-cmake-gtest <!nocheck>, ros-jazzy-ament-cmake-python, ros-jazzy-ament-lint-auto <!nocheck>, ros-jazzy-ament-lint-common <!nocheck>, ros-jazzy-geometry-msgs, ros-jazzy-nav-msgs, ros-jazzy-nav2-core, ros-jazzy-nav2-costmap-2d, ros-jazzy-pluginlib, ros-jazzy-prox-mpc-msgs, ros-jazzy-rclcpp, ros-jazzy-rclcpp-lifecycle, ros-jazzy-sensor-msgs, ros-jazzy-std-msgs, ros-jazzy-tf2, ros-jazzy-tf2-ros, ros-jazzy-ros-workspace
+Homepage: https://index.ros.org/p/prox_mpc_benchmark/#jazzy
+Standards-Version: 3.9.2
+
+Package: ros-jazzy-prox-mpc-benchmark
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ffmpeg, libavcodec-dev, libavformat-dev, libavutil-dev, libswscale-dev, python3-numpy, python3-yaml, ros-jazzy-ament-index-python, ros-jazzy-builtin-interfaces, ros-jazzy-dwb-core, ros-jazzy-dwb-critics, ros-jazzy-geometry-msgs, ros-jazzy-joint-state-publisher, ros-jazzy-launch, ros-jazzy-launch-ros, ros-jazzy-nav-msgs, ros-jazzy-nav2-behaviors, ros-jazzy-nav2-bringup, ros-jazzy-nav2-bt-navigator, ros-jazzy-nav2-controller, ros-jazzy-nav2-core, ros-jazzy-nav2-costmap-2d, ros-jazzy-nav2-graceful-controller, ros-jazzy-nav2-lifecycle-manager, ros-jazzy-nav2-map-server, ros-jazzy-nav2-minimal-tb3-sim, ros-jazzy-nav2-mppi-controller, ros-jazzy-nav2-msgs, ros-jazzy-nav2-navfn-planner, ros-jazzy-nav2-planner, ros-jazzy-nav2-regulated-pure-pursuit-controller, ros-jazzy-pluginlib, ros-jazzy-prox-mpc-controller, ros-jazzy-prox-mpc-demo, ros-jazzy-prox-mpc-msgs, ros-jazzy-prox-mpc-obstacle-tracker, ros-jazzy-rcl-interfaces, ros-jazzy-rclcpp, ros-jazzy-rclcpp-lifecycle, ros-jazzy-rclpy, ros-jazzy-robot-state-publisher, ros-jazzy-ros-gz-bridge, ros-jazzy-ros-gz-sim, ros-jazzy-ros2bag, ros-jazzy-rosbag2-py, ros-jazzy-rviz2, ros-jazzy-sensor-msgs, ros-jazzy-std-msgs, ros-jazzy-tf2, ros-jazzy-tf2-ros, ros-jazzy-vector-pursuit-controller, ros-jazzy-visualization-msgs, ros-jazzy-xacro, ros-jazzy-ros-workspace
+Description: Scenario-driven benchmarking harness for the ProxMPC stack: a controller- agnostic C++ live metrics node (cross-track / goal error + solver-diagnostics tap) plus installed Python tooling to orchestrate the scenario x model x controller x mode matrix, compute per-run metrics, and aggregate them.
+ Reuses the demo worlds/maps/models; owns the result artifacts (gitignored).
