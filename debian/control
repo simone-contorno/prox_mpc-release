@@ -1,0 +1,13 @@
+Source: ros-jazzy-prox-mpc-obstacle-tracker
+Section: misc
+Priority: optional
+Maintainer: "Simone Contorno" <simone.contorno@outlook.it>
+Build-Depends: debhelper (>= 9.0.0), libeigen3-dev, ros-jazzy-ament-cmake, ros-jazzy-ament-cmake-gtest <!nocheck>, ros-jazzy-ament-lint-auto <!nocheck>, ros-jazzy-ament-lint-common <!nocheck>, ros-jazzy-geometry-msgs, ros-jazzy-lifecycle-msgs, ros-jazzy-prox-mpc-msgs, ros-jazzy-rclcpp, ros-jazzy-rclcpp-components, ros-jazzy-rclcpp-lifecycle, ros-jazzy-sensor-msgs, ros-jazzy-tf2, ros-jazzy-tf2-ros, ros-jazzy-ros-workspace
+Homepage: https://index.ros.org/p/prox_mpc_obstacle_tracker/#jazzy
+Standards-Version: 3.9.2
+
+Package: ros-jazzy-prox-mpc-obstacle-tracker
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libeigen3-dev, python3-yaml, ros-jazzy-ament-index-python, ros-jazzy-geometry-msgs, ros-jazzy-launch, ros-jazzy-launch-ros, ros-jazzy-lifecycle-msgs, ros-jazzy-prox-mpc-msgs, ros-jazzy-rclcpp, ros-jazzy-rclcpp-components, ros-jazzy-rclcpp-lifecycle, ros-jazzy-ros2launch, ros-jazzy-sensor-msgs, ros-jazzy-tf2, ros-jazzy-tf2-ros, ros-jazzy-ros-workspace
+Description: In-house 2D-lidar dynamic-obstacle detector and tracker for ProxMPC: a lifecycle node that clusters a LaserScan, associates clusters to IMM (constant-velocity / constant-turn-rate) Kalman tracks in a fixed frame, and publishes their position and velocity as a prox_mpc_msgs/ObstacleArray.
+ License-clean (no third-party trackers).
