@@ -1,0 +1,13 @@
+ros-jazzy-prox-mpc-obstacle-tracker (1.0.0-1noble) noble; urgency=high
+
+  * Initial release: lifecycle node that clusters a 2D ``LaserScan``, associates
+    clusters to an IMM (constant-velocity + constant-turn-rate) filter in a fixed
+    frame, and publishes a ``prox_mpc_msgs/ObstacleArray``.
+  * Composable component registration plus a mutually-exclusive callback group and
+    teardown guard, so it is safe under a MultiThreadedExecutor; node-only
+    ``log_level`` parameter and a standalone launch file.
+  * Contributors: Simone Contorno
+
+ -- "Simone Contorno" <simone.contorno@outlook.it>  Mon, 27 Jul 2026 22:00:00 -0000
+
+
