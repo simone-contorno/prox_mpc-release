@@ -1,172 +1,207 @@
-# ProxMPC - Full-Stack Architecture
+# ProxMPC - Architecture and Technical Reference
 
-This document is the system-level overview of the ProxMPC workspace: how the
-packages depend on and communicate with each other, and the runtime data flow for
-each way the stack is run.
-Per-package design lives in each package's own `doc/`; this document ties them
-together.
+This document explains the design of ProxMPC, whose math lives in the
+`prox_mpc_core` package: a C++17 nonlinear Model Predictive Control (NMPC)
+library.
+The controller solves the nonlinear optimal-control problem with a Sequential
+Quadratic Programming (SQP) scheme that repeatedly builds and solves a Quadratic
+Program (QP) using the ProxQP solver from `proxsuite`, with Eigen for linear
+algebra.
+All public types live in the `prox_mpc` C++ namespace.
 
-- Engine: [prox_mpc_core/doc/architecture.md](../prox_mpc_core/doc/architecture.md)
-- Controller: [prox_mpc_controller/doc/architecture.md](../prox_mpc_controller/doc/architecture.md)
-- Obstacle tracker: [prox_mpc_obstacle_tracker/doc/architecture.md](../prox_mpc_obstacle_tracker/doc/architecture.md)
-- Demos: [prox_mpc_demo/doc/simulation.md](../prox_mpc_demo/doc/simulation.md),
-  [prox_mpc_demo/doc/nav2-simulation.md](../prox_mpc_demo/doc/nav2-simulation.md)
+This document is the design overview.
+The mathematics is split into two companion documents: [nmpc.md](nmpc.md) for the
+NMPC problem, the SQP loop, and the QP sub-problem, and
+[obstacle-avoidance.md](obstacle-avoidance.md) for the obstacle constraints.
 
-## Table of Contents
+## Scope
 
-- [Packages at a glance](#packages-at-a-glance)
-- [Build and plugin dependencies](#build-and-plugin-dependencies)
-- [Runtime: standalone simulation](#runtime-standalone-simulation)
-- [Runtime: Nav2 + Gazebo](#runtime-nav2--gazebo)
-- [Runtime: predictive (dynamic) obstacle avoidance](#runtime-predictive-dynamic-obstacle-avoidance)
-- [Cross-cutting conventions](#cross-cutting-conventions)
-- [License](#license)
+`prox_mpc_core` is a **library only**: it contains no ROS 2 node, `main()`,
+publisher, subscriber, topic, or launch file.
+The only ROS-coupled function is `optimPath()`, which converts an optimal state
+trajectory into a `nav_msgs/msg/Path` for visualization.
+Sibling packages consume the core: `prox_mpc_demo` (a self-contained closed-loop
+simulation and benchmark), `prox_mpc_controller` (a Nav2 `nav2_core::Controller`
+plugin, verified in simulation), and `prox_mpc_test_models` (fault-injection
+`Model` plugins for the controller tests).
 
-## Packages at a glance
+## Source layout
 
-| Package | Kind | Role |
+```text
+prox_mpc_core/include/prox_mpc/
+  structs.hpp  ProbDim, MPCParams, ModelInfo, Constraints (plain data)
+  model.hpp    Model: vehicle interface (kinematics + constraints)
+  proxqp.hpp   ProxQP: QP assembly and solve wrapper
+  mpc.hpp      MPC: SQP driver and configuration
+  utils.hpp    free functions, Eigen/ROS aliases
+  models/      Bicycle and Unicycle reference kinematic models
+prox_mpc_core/src/
+  model.cpp    Model getters/setters
+  mpc.cpp      MPC::init, MPC::solve (SQP loop), configuration
+  proxqp.cpp   ProxQP::init, ProxQP::solve, setH/setc/setE/setb/setC/setd
+  plugins.cpp  pluginlib registration of the bundled models
+  utils.cpp    normalizeAngle, optimPath
+```
+
+The bundled models are also exported as `pluginlib` plugins of the
+`prox_mpc::Model` base type (`prox_mpc_core_plugins.xml`), so a consumer can load
+a model by name without depending on its concrete type.
+
+## Class structure
+
+`Model`, `MPC`, and `ProxQP` compose the plain-data structs by inheritance.
+`Model` describes one vehicle; `MPC` owns the SQP loop and a `ProxQP`; `ProxQP`
+assembles and solves a single QP sub-problem.
+
+```mermaid
+classDiagram
+  class ProbDim {
+    +size_t Np
+    +size_t Nc
+    +size_t n
+    +size_t m
+    +double dt
+    +double T
+  }
+  class MPCParams {
+    +MatrixXd x
+    +MatrixXd u
+    +VectorXd w
+    +MatrixXd Q
+    +MatrixXd S
+    +MatrixXd R
+    +MatrixXd W
+  }
+  class ModelInfo {
+    +VectorXd x
+    +VectorXd u
+    +MatrixXd A
+    +MatrixXd B
+    +VectorXd c
+  }
+  class Constraints {
+    +map ineq_x
+    +map ineq_u
+    +map ineq_du
+    +map ineq_w
+    +bool obs_flag
+  }
+  class Model {
+    +updateA(dt)
+    +updateB()
+    +updatec(dt, x_next)
+    +configure(params)
+    +toTwist(u) Twist
+    +getIneq(var) const&
+  }
+  class ProxQP {
+    +init(model)
+    +solve(x,u,u_prev,w,goal_x,goal_u)
+    -setH() setc() setE() setb() setC() setd()
+  }
+  class MPC {
+    +init(model)
+    +solve() tuple~x,u~
+    +configProxQP()
+  }
+  ModelInfo <|-- Model
+  Constraints <|-- Model
+  ProbDim <|-- MPC
+  MPCParams <|-- MPC
+  MPCParams <|-- ProxQP
+  MPC o-- Model : shared_ptr
+  MPC o-- ProxQP : shared_ptr
+  ProxQP o-- Model : shared_ptr
+```
+
+## The vehicle model interface
+
+A concrete model derives from `Model` and overrides three pure virtual functions
+that supply the first-order (Euler) linearization of the continuous dynamics
+$\dot{x} = f(x, u)$ about the current operating point:
+
+- `updateA(dt)` fills $A_k = \partial x_{k+1} / \partial x_k$, the discrete state
+  Jacobian.
+- `updateB()` fills $B_k = \partial f / \partial u$, the input Jacobian (the
+  assembly multiplies it by `dt`).
+- `updatec(dt, x_next)` fills the residual $c_k$ of the Euler step.
+
+Because the functions are pure virtual, a model that omits one does not compile,
+so the interface cannot be partially implemented by accident. `Model` also
+declares a virtual destructor, since it is owned through `shared_ptr<Model>` and
+by the plugin loader.
+
+Two further virtual hooks let a model be loaded and used generically:
+
+- `configure(params)` sets the model constants by name after construction (the
+  default constructor required for plugin loading cannot take parameters). The
+  default reads no keys; an overriding model applies any present key and keeps
+  its constructor value otherwise.
+- `toTwist(u)` maps a control vector to a `geometry_msgs/msg/Twist`. The default
+  is the identity mapping (first control to `linear.x`, second to `angular.z`);
+  a model whose control is not a body twist overrides it. The bicycle, for
+  example, derives the yaw rate as $\omega = v \sin(\delta) / L$.
+
+### Model selection
+
+`prox_mpc::Model` is a `pluginlib` base type, and `Bicycle` and `Unicycle` are
+registered as plugins named `prox_mpc_core/Bicycle` and `prox_mpc_core/Unicycle`.
+A consumer loads a model with a `pluginlib::ClassLoader<prox_mpc::Model>`, calls
+`configure(...)`, and passes the instance to `MPC::init(...)`. Adding a new model
+therefore requires no change to this library: a model only needs to derive from
+`Model`, implement the three Jacobian hooks, and be registered as a plugin.
+
+The residual and Jacobian formulas for the bundled models are given in
+[nmpc.md](nmpc.md).
+
+## Mathematical formulation
+
+Each control cycle the SQP builds and solves one convex QP about the current
+trajectory iterate:
+
+$$
+\min_{z}\; \tfrac{1}{2} z^\top H z + c^\top z
+\quad \text{s.t.} \quad E z = b, \quad d_{\text{low}} \le C z \le d_{\text{upp}},
+$$
+
+where the decision vector $z$ stacks the state, control, and obstacle-slack
+increments over the horizon.
+$H$ and $c$ carry the doubled tracking weights $Q$, $S$, $R$ (and $W$ for the
+slacks); $E$ and $b$ pin the initial state and the Euler dynamics; and $C$ and $d$
+hold the state, control, and control-rate bounds together with the obstacle
+half-planes.
+`MPC::solve` slides the previous solution forward, pins the first state to the
+current pose, solves the QP, and applies the increments.
+It reports convergence through `qp_info.status` and takes no safety action on
+failure, leaving the fallback to the caller (see [nmpc.md](nmpc.md)).
+
+The full derivation - the optimal-control problem, the decision-variable layout,
+the QP objective and constraints, the SQP loop with its solve data flow, and the
+ProxQP settings - is in [nmpc.md](nmpc.md).
+The obstacle-avoidance constraints are derived in
+[obstacle-avoidance.md](obstacle-avoidance.md).
+
+## Key interfaces
+
+| Symbol | Type | Meaning |
 | --- | --- | --- |
-| `prox_mpc_core` | C++ library + `Model` plugins | The SQP/QP NMPC engine and the vehicle-model interface. No ROS node. |
-| `prox_mpc_msgs` | `rosidl` interfaces | `Obstacle` / `ObstacleArray` contract between tracker and controller. |
-| `prox_mpc_controller` | Nav2 controller plugin | Wraps the engine behind `nav2_core::Controller`. |
-| `prox_mpc_obstacle_tracker` | Lifecycle node + ROS-free core | 2D-lidar dynamic-obstacle detector and IMM (CV+CTRV) tracker. |
-| `prox_mpc_demo` | Executables + launch/config/assets | Standalone benchmark and Nav2 + Gazebo bring-up. |
-| `prox_mpc_test_models` | `Model` plugins | Fault-injection models for controller tests. |
-| `prox_mpc_benchmark` | Metrics node + Python tooling + kinematic plant + scan simulator | Measures accuracy / precision / real-time across the scenario x model x controller x mode matrix; hosts the mode (b2) Nav2 plant and a scan simulator so every controller (DWB, MPPI, RPP, Graceful, Vector Pursuit, ProxMPC) perceives the scenario obstacles through the same costmap. See [prox_mpc_benchmark/README.md](../prox_mpc_benchmark/README.md) and the [comparison results](controller-comparison-results.md). |
+| `MPC::solve()` | `tuple<MatrixXd, MatrixXd>` | optimal state and control trajectories |
+| `MPC::qp_info.status` | `proxqp::QPSolverOutput` | `PROXQP_SOLVED` on success; check after each `solve()` |
+| `MPC::setPose(pose)` | `VectorXd` | current measured vehicle state |
+| `MPC::setGoalX/GoalU` | `MatrixXd` | reference trajectories |
+| `MPC::setMaxObs(K)` | `size_t` | obstacle-slot capacity per node (0 disables); sizes the QP |
+| `MPC::setObs(obs)` | `MatrixXd` (Np*K x 3) | per (node, slot) triples `[o_x, o_y, d_safe]` |
+| `Model::configure(params)` | `map<string,double>` | set model constants by name |
+| `Model::toTwist(u)` | `geometry_msgs/msg/Twist` | map a control vector to a body twist |
+| `optimPath(x, now)` | `nav_msgs/msg/Path` | trajectory as a ROS path message |
 
-## Build and plugin dependencies
+## Numerical and resource notes
 
-Solid arrows are build/runtime package dependencies; dashed arrows are `pluginlib`
-load relationships (resolved by name at runtime, not a link dependency).
-
-```mermaid
-flowchart TD
-  core[prox_mpc_core<br/>SQP/QP engine + Model plugins]
-  msgs[prox_mpc_msgs<br/>Obstacle / ObstacleArray]
-  ctrl[prox_mpc_controller<br/>nav2_core::Controller]
-  trk[prox_mpc_obstacle_tracker<br/>lifecycle node]
-  demo[prox_mpc_demo<br/>sim + Nav2 bring-up]
-  testm[prox_mpc_test_models<br/>fault-injection models]
-  nav2[(Nav2<br/>nav2_core, nav2_costmap_2d)]
-
-  ctrl --> core
-  ctrl --> msgs
-  ctrl --> nav2
-  trk --> msgs
-  testm --> core
-  demo --> core
-  demo -. launches .-> ctrl
-  demo -. launches .-> trk
-
-  core -. Model plugin .-> ctrl
-  core -. Model plugin .-> demo
-  testm -. test Model plugin .-> ctrl
-  trk -- tracked_obstacles --> ctrl
-```
-
-The `Model` interface is the extension seam: `prox_mpc_core` registers `Bicycle`
-and `Unicycle`, and `prox_mpc_test_models` registers a fault-injection model, all
-against the same `prox_mpc::Model` base.
-The controller and the demo load a model by name, so adding a vehicle model needs
-no change to the consumers.
-
-## Runtime: standalone simulation
-
-The `prox_mpc_simulation` node closes the loop on the engine with no external
-simulator: it solves, commands, and advances the simulated pose to the model's own
-prediction each step.
-
-```mermaid
-flowchart LR
-  subgraph sim[prox_mpc_simulation node]
-    mpc[prox_mpc::MPC]
-    model[Model bicycle / unicycle]
-    mpc --> model
-  end
-  model -- /robot/cmd_vel Twist --> rviz[RViz]
-  mpc -- /prox_mpc/path Path --> rviz
-  mpc -- /prox_mpc/diagnostics SolverDiagnostics --> tele[solver telemetry / benchmark]
-  sim -- map to base_link TF --> rviz
-  model -- predicted next state --> mpc
-```
-
-Details and parameters: [prox_mpc_demo/doc/simulation.md](../prox_mpc_demo/doc/simulation.md).
-
-## Runtime: Nav2 + Gazebo
-
-Under Nav2, the controller plugin is loaded by `controller_server` and drives the
-engine each control step.
-The command flows through the stock Nav2 velocity chain to Gazebo; the local
-costmap and the robot footprint feed obstacle avoidance and the footprint veto.
-
-```mermaid
-flowchart TD
-  gz[(Gazebo Harmonic<br/>TurtleBot3 waffle)]
-  gz -- /scan, /odom, sensors --> nav2sense[Nav2 sensing<br/>AMCL, costmaps]
-  planner[Nav2 planner_server] -- global plan Path --> cs
-
-  subgraph cs[controller_server]
-    ctrl[ProxMpcController]
-    ctrl --> mpc[prox_mpc::MPC]
-    mpc --> model[Model Unicycle / Bicycle]
-  end
-
-  nav2sense -- local costmap + footprint --> ctrl
-  ctrl -- prox_mpc_local_plan Path --> rviz[RViz]
-  ctrl -- TwistStamped --> smoother[velocity_smoother]
-  smoother -- cmd_vel_smoothed --> mon[collision_monitor]
-  mon -- cmd_vel --> bridge[ros_gz bridge]
-  bridge --> gz
-```
-
-The baseline configuration runs the in-loop obstacle term off
-(`max_obstacles: 0`) and delegates avoidance to Nav2's planner and costmaps; the
-controller tracks the rerouted collision-free path.
-Scenarios, configuration rationale, and verified results are in
-[prox_mpc_demo/doc/nav2-simulation.md](../prox_mpc_demo/doc/nav2-simulation.md).
-
-## Runtime: predictive (dynamic) obstacle avoidance
-
-The opt-in predictive mode adds the obstacle tracker and turns on the controller's
-in-loop obstacle term.
-The tracker clusters the lidar, runs an IMM (CV+CTRV) filter per object, and
-publishes confirmed tracks with sampled predicted positions; the controller follows
-each track's predicted trajectory over the horizon and binds it to a constraint
-slot, filling the rest from the costmap (hybrid).
-
-```mermaid
-flowchart LR
-  gz[(Gazebo)] -- /scan LaserScan --> trk
-  subgraph trk[prox_mpc_obstacle_tracker]
-    clus[cluster_points] --> kf[Tracker<br/>IMM CV+CTRV]
-  end
-  trk -- tracked_obstacles ObstacleArray --> ctrl
-  cm[local costmap] -- occupied cells + footprint --> ctrl
-  subgraph ctrl[ProxMpcController]
-    fill[predictive + hybrid fill] --> mpc[prox_mpc::MPC]
-  end
-  ctrl -- prox_mpc_predicted_obstacles MarkerArray --> rviz[RViz]
-  ctrl -- TwistStamped --> nav2[Nav2 velocity chain]
-```
-
-The `prox_mpc_msgs/ObstacleArray` header carries the scan stamp (used to age the
-prediction) and the tracking frame (used to transform the obstacles into the
-costmap global frame).
-With predictions off, stale, or missing, the controller falls back to the
-costmap-only fill, so the feature is a clean enable/disable switch.
-
-## Cross-cutting conventions
-
-- **Frames.** REP-103 conventions; the tracker estimates velocity in a fixed,
-  non-rotating frame (for example `odom`), and the controller transforms plans and
-  obstacles into the costmap global frame via `tf2`.
-- **Safety split.** The engine keeps a fast convex disc constraint inside the
-  optimization; the controller adds an exact polygon-footprint veto as the
-  conservative backstop, and decelerates within the model's limits on any fault.
-- **Types.** All MPC quantities are `double`; ROS parameters are `double` / `int`
-  / `bool` / `string` only.
-- **License.** Apache-2.0 across the workspace, with a short SPDX header per file.
-
-## License
-
-[Apache-2.0](../LICENSE).
+- All MPC quantities use `double`; the step size `dt`/`T` are `double` to avoid
+  silent narrowing.
+- The QP assembly runs every SQP iteration and every control step; Eigen
+  matrices are passed by `const&` and the constraint maps are returned by
+  `const&` to avoid per-iteration heap copies on this hot path.
+- `EIGEN_NO_DEBUG` removes Eigen's internal assertions in the Release build.
+- The obstacle constraint is numerically sensitive: a coincident robot/obstacle
+  position is guarded with an epsilon to avoid injecting `NaN` into the QP.
