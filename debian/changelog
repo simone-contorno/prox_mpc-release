@@ -1,0 +1,18 @@
+ros-jazzy-prox-mpc-test-models (2.0.0-1bookworm) bookworm; urgency=high
+
+  * Added fault and mapping fixtures: asymmetric control bounds, a permuted planar
+    mapping, and a non-finite-other-axes twist model.
+  * Contributors: Simone Contorno
+
+ -- "Simone Contorno" <simone.contorno@outlook.it>  Sat, 12 Sep 2026 22:00:00 -0000
+
+ros-jazzy-prox-mpc-test-models (1.0.0-1bookworm) bookworm; urgency=high
+
+  * Initial release: fault-injection ``prox_mpc::Model`` plugin (``NonFiniteTwist``)
+    used by the controller test suite to exercise fail-safe branches through the
+    real pluginlib load path.
+  * Contributors: Simone Contorno
+
+ -- "Simone Contorno" <simone.contorno@outlook.it>  Mon, 27 Jul 2026 22:00:00 -0000
+
+
