@@ -1,0 +1,13 @@
+Source: ros-jazzy-prox-mpc-msgs
+Section: misc
+Priority: optional
+Maintainer: "Simone Contorno" <simone.contorno@outlook.it>
+Build-Depends: debhelper (>= 9.0.0), ros-jazzy-ament-cmake, ros-jazzy-ament-cmake-gtest <!nocheck>, ros-jazzy-ament-lint-auto <!nocheck>, ros-jazzy-ament-lint-common <!nocheck>, ros-jazzy-geometry-msgs, ros-jazzy-rosidl-default-generators, ros-jazzy-rosidl-typesupport-introspection-cpp <!nocheck>, ros-jazzy-std-msgs, ros-jazzy-ros-workspace, ros-jazzy-rosidl-typesupport-fastrtps-c, ros-jazzy-rosidl-typesupport-fastrtps-cpp
+Homepage: https://index.ros.org/p/prox_mpc_msgs/#jazzy
+Standards-Version: 3.9.2
+
+Package: ros-jazzy-prox-mpc-msgs
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-jazzy-geometry-msgs, ros-jazzy-rosidl-default-runtime, ros-jazzy-std-msgs, ros-jazzy-ros-workspace
+Description: Message contract for the ProxMPC stack: Obstacle and ObstacleArray carry tracked-obstacle id, position, velocity, radius, covariances, and sampled predicted positions from the obstacle tracker to the Nav2 controller plugin; SolverDiagnostics carries per-control-cycle NMPC/QP solver telemetry.
+ Interface-only package; no node.
