@@ -81,11 +81,25 @@ default on Ubuntu 24.04) the X server is rootless `Xwayland`: the compositor dra
 each window through Wayland, so the grabbable X root stays **black** and every clip
 records black regardless of what is on screen. Pick one of:
 
-- **Xorg session (simplest, GPU-rendered):** log in via the GDM gear menu as
-  "Ubuntu on Xorg", then run the recorder unchanged (it captures `$DISPLAY`, `:0`).
-- **Virtual Xvfb display (headless, scriptable - how the bundled clips were made):**
+- **Xorg session (GPU-rendered - how the bundled clips are made):** log in via the
+  GDM gear menu as "Ubuntu on Xorg". On a desktop session RViz has to run
+  fullscreen - the window manager keeps a normal window off its panels, so a
+  windowed capture picks up the dock, the top bar and the title bar - and the grab
+  has to cover the whole screen; the grid combiner scales each clip to its cell. On a
+  hybrid-graphics laptop add `--gpu-offload` so RViz renders on the NVIDIA GPU:
+
+  ```bash
+  ros2 run prox_mpc_benchmark record_scenarios.py --display :0 \
+    --resolution 2560x1440 --fullscreen --gpu-offload
+  ```
+
+  Set `--resolution` to your screen size. The capture includes the mouse pointer and
+  anything that appears on screen, so leave the desktop alone while it records.
+- **Virtual Xvfb display (headless, scriptable, no screen taken over):**
   start a virtual X server sized to the capture, then point the recorder at it with
-  `--display`. RViz falls back to software GL (llvmpipe), which renders correctly:
+  `--display`. RViz falls back to software GL (llvmpipe), which renders correctly but
+  on the CPU: alongside the Nav2 stack it draws well below the capture rate, so
+  frames repeat and the clips look choppy:
 
   ```bash
   Xvfb :99 -screen 0 1920x1080x24 +extension GLX +render -nolisten tcp &
@@ -111,10 +125,12 @@ Xvfb :99 -screen 0 1920x1080x24 +extension GLX +render -nolisten tcp &
 ros2 run prox_mpc_benchmark record_scenarios.py --display :99
 ```
 
-On a native Xorg session the no-argument form captures `:0` directly:
+On a native Xorg desktop session record fullscreen over the whole screen, adding
+`--gpu-offload` on a hybrid-graphics laptop:
 
 ```bash
-ros2 run prox_mpc_benchmark record_scenarios.py
+ros2 run prox_mpc_benchmark record_scenarios.py --display :0 \
+  --resolution 2560x1440 --fullscreen --gpu-offload
 ```
 
 The equivalent fully-explicit invocation:
@@ -135,10 +151,18 @@ ros2 run prox_mpc_benchmark record_scenarios.py \
 ```
 
 For each scenario the recorder waits `--warmup` seconds for lifecycle activation,
-starts a fixed-length ffmpeg x11grab recording, sends the scenario goal after
-`--goal-delay` seconds, waits for ffmpeg to reach its `--duration`, then tears the
-whole process tree down with a process-group `SIGINT` (graceful) escalating to
-`SIGKILL`.
+starts an ffmpeg x11grab capture, sends the scenario goal after `--goal-delay`
+seconds, waits for the capture to finish, then tears the whole process tree down
+with a process-group `SIGINT` (graceful) escalating to `SIGKILL`.
+
+The capture runs longer than the clip: it has to cover the goal delay, the few
+seconds the stack takes from goal to first motion, and a spuriously aborted goal's
+retry. The clip is then cut to open 0.3 s before the robot first moves, which the
+recorder reads from `/odom` - the same event, at the same 1 mm threshold, that
+releases the scenario's obstacles. A clip therefore opens on the scene coming alive
+rather than on a frozen robot, however long the stack took to start. If the robot
+never moves, the recorder keeps the head of the capture and prints a warning, so a
+failed navigation is not mistaken for a good clip.
 The exact ffmpeg command is printed for every clip.
 One scenario failing does not abort the rest; the exit code is non-zero if any
 scenario failed.
@@ -185,6 +209,7 @@ mode (the four paths and four cell labels, top-left -> bottom-right):
 # one folder per controller (the tracker starts only for proxmpc_pred)
 for c in proxmpc_pred dwb mppi regulated_pure_pursuit; do
   ros2 run prox_mpc_benchmark record_scenarios.py --controller "$c" \
+    --display :0 --resolution 2560x1440 --fullscreen --gpu-offload \
     --out-dir results/videos/"$c"
 done
 
@@ -217,15 +242,17 @@ All artifacts land under `results/videos/` (gitignored):
 | `--scenarios` | `nav2_open,static_box,dynamic_line_forward,dynamic_circle` | scenario basenames to record |
 | `--controller` | `proxmpc_pred` | controller preset injected into `FollowPath` |
 | `--robot` | `waffle` | robot shown (URDF + model pairing) |
-| `--duration` | `20` | clip length in seconds (self-terminating via `-t`) |
+| `--duration` | `20` | clip length in seconds; a scenario's `video.duration_s` overrides it (`dynamic_circle` sets 25) |
 | `--resolution` | `1920x1080` | grab size `WxH` |
 | `--offset` | `0,0` | grab top-left origin `x,y` -> x11grab input `:0.0+x,y` |
 | `--display` | `$DISPLAY` or `:0` | X display to capture and render on |
 | `--framerate` | `30` | capture frame rate |
 | `--warmup` | `14` | activation wait before recording starts [s] |
-| `--goal-delay` | `3` | wait after recording starts before the goal is sent [s] |
+| `--goal-delay` | `3` | wait after the capture starts before the goal is sent [s]; the clip is cut at first motion, so this is not dead time in the clip |
 | `--timeout` | `55` | goal timeout passed to `goal_sender.py` [s] |
 | `--out-dir` | `results/videos` | clip output directory |
+| `--gpu-offload` | off | render RViz on the NVIDIA GPU through PRIME render offload (`__NV_PRIME_RENDER_OFFLOAD=1`, `__GLX_VENDOR_LIBRARY_NAME=nvidia`, set for RViz alone); needs a real X server running the NVIDIA driver and does not work on a virtual Xvfb display, which has no hardware GL |
+| `--fullscreen` | off | start RViz fullscreen and skip the window placement; on a desktop session this is what keeps the panels and the window's title bar out of the capture, so pair it with `--resolution` set to the full screen size |
 
 `combine_grid.sh`:
 
@@ -250,8 +277,10 @@ All artifacts land under `results/videos/` (gitignored):
   region; when absent the recorder simply grabs the full region.
 - ffmpeg `drawtext` requires an ffmpeg built with libfreetype (the stock Ubuntu
   `ffmpeg` package qualifies); the label filter fails otherwise.
-- Clip length is fixed by `--duration`, so the four clips stay length-synced and
-  xstack combines them cleanly.
+- Clip length is fixed per scenario (`--duration`, or the scenario's own
+  `video.duration_s`), and every clip opens at first motion, so the four
+  controllers of one scenario stay length-synced and start together, and xstack
+  combines them cleanly.
 
 ## License
 
