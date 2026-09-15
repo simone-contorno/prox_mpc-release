@@ -26,5 +26,5 @@ tracks:
     release_tag: v:{version}
     ros_distro: jazzy
     vcs_type: git
-    vcs_uri: "\thttps://github.com/simone-contorno/prox_mpc.git"
+    vcs_uri: https://github.com/simone-contorno/prox_mpc.git
     version: :{auto}
